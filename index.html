@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GATE DA Chapter-wise Revision Planner</title>
+  <title>GATE DA AI-Enhanced Revision Planner</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-gradient-to-r from-indigo-100 to-blue-100 min-h-screen flex items-center justify-center p-4">
   <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-4xl">
-    <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">GATE DA Chapter-wise Revision Planner</h1>
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">GATE DA AI-Enhanced Revision Planner</h1>
     
     <!-- Subject and Chapter Input Form -->
     <div class="mb-6">
@@ -50,15 +51,19 @@
       </div>
     </div>
 
+    <!-- AI Suggestions -->
+    <div class="mb-6">
+      <h2 class="text-lg font-semibold text-gray-700 mb-2">AI Study Suggestions</h2>
+      <p id="aiSuggestions" class="text-sm text-gray-600">Complete tasks to receive personalized study suggestions.</p>
+    </div>
+
     <!-- Task List -->
     <ul id="taskList" class="space-y-4"></ul>
 
-    <!-- Progress Bar -->
+    <!-- Progress Chart -->
     <div class="mt-6">
-      <h2 class="text-lg font-semibold text-gray-700">Revision Progress</h2>
-      <div class="w-full bg-gray-200 rounded-full h-4 mt-2">
-        <div id="progressBar" class="bg-indigo-600 h-4 rounded-full" style="width: 0%"></div>
-      </div>
+      <h2 class="text-lg font-semibold text-gray-700">Revision Progress by Subject</h2>
+      <canvas id="progressChart" class="mt-4"></canvas>
       <p id="progressText" class="text-sm text-gray-600 mt-2">0% of tasks fully revised (7/7)</p>
     </div>
   </div>
@@ -67,10 +72,23 @@
     let subjects = JSON.parse(localStorage.getItem('gateDASubjects')) || {};
     let tasks = JSON.parse(localStorage.getItem('gateDATasks')) || [];
 
+    // GATE DA subject weightages (approximate, based on syllabus)
+    const subjectWeightages = {
+      'Probability and Statistics': 0.2,
+      'Machine Learning': 0.25,
+      'Database Management Systems': 0.15,
+      'Programming and Data Structures': 0.15,
+      'Data Warehousing and Mining': 0.1,
+      'High Performance Computing': 0.1,
+      'AI and Deep Learning': 0.2
+    };
+
     function saveData() {
       localStorage.setItem('gateDASubjects', JSON.stringify(subjects));
       localStorage.setItem('gateDATasks', JSON.stringify(tasks));
       updateProgress();
+      updateAISuggestions();
+      renderChart();
     }
 
     function addSubjectChapters() {
@@ -87,7 +105,6 @@
       subjects[subject] = Array.from({ length: chapterCount }, (_, i) => `Chapter ${i + 1}`);
       saveData();
       renderSubjects();
-      updateSubjectSelect();
       chapterCountInput.value = '';
     }
 
@@ -138,8 +155,46 @@
       const totalTasks = tasks.length;
       const fullyRevisedTasks = tasks.filter(task => task.revisions >= 7).length;
       const progress = totalTasks === 0 ? 0 : (fullyRevisedTasks / totalTasks) * 100;
-      document.getElementById('progressBar').style.width = `${progress}%`;
       document.getElementById('progressText').textContent = `${Math.round(progress)}% of tasks fully revised (7/7)`;
+    }
+
+    function updateAISuggestions() {
+      const aiSuggestions = document.getElementById('aiSuggestions');
+      if (tasks.length === 0) {
+        aiSuggestions.textContent = 'Add tasks to receive personalized study suggestions.';
+        return;
+      }
+
+      // Simple AI: Prioritize tasks based on due date, revisions, priority, and subject weightage
+      const now = new Date();
+      const priorityScores = tasks.map(task => {
+        const daysUntilDue = task.dueDate ? (new Date(task.dueDate) - now) / (1000 * 60 * 60 * 24) : 10;
+        const urgency = daysUntilDue <= 0 ? 100 : daysUntilDue <= 3 ? 50 : 10;
+        const priorityValue = { 'High': 3, 'Medium': 2, 'Low': 1 }[task.priority];
+        const revisionScore = (7 - task.revisions) * 10;
+        const subjectWeight = subjectWeightages[task.subject] || 0.1;
+        return { task, score: urgency + priorityValue * 20 + revisionScore + subjectWeight * 100 };
+      });
+
+      priorityScores.sort((a, b) => b.score - a.score);
+      const topTask = priorityScores[0].task;
+      const progress = tasks.filter(t => t.subject === topTask.subject && t.revisions < 7).length;
+      const resources = {
+        'Probability and Statistics': 'NPTEL Statistics, depthofml YouTube',
+        'Machine Learning': 'NPTEL ML, GATE PYQs',
+        'Database Management Systems': 'GeeksforGeeks SQL, NPTEL DBMS',
+        'Programming and Data Structures': 'LeetCode, NPTEL Programming',
+        'Data Warehousing and Mining': 'NPTEL Data Mining',
+        'High Performance Computing': 'NPTEL HPC',
+        'AI and Deep Learning': 'Coursera Deep Learning, depthofml'
+      };
+
+      aiSuggestions.innerHTML = `
+        <strong>Top Priority:</strong> Focus on "${topTask.text}" (${topTask.subject}, ${topTask.chapter}, ${topTask.revisions}/7 revisions). 
+        ${progress > 0 ? `You have ${progress} tasks left to revise in ${topTask.subject}.` : `Great job, ${topTask.subject} is on track!`}
+        <br><strong>Resource:</strong> Check ${resources[topTask.subject] || 'GATE PYQs'}.
+        <br><strong>Tip:</strong> Use spaced repetition; revise ${topTask.subject} today!
+      `;
     }
 
     function updateSubjectSelect() {
@@ -216,7 +271,49 @@
         `;
         taskList.appendChild(li);
       });
-      updateProgress();
+      updateAISuggestions();
+    }
+
+    let progressChart = null;
+    function renderChart() {
+      const ctx = document.getElementById('progressChart').getContext('2d');
+      const subjectProgress = Object.keys(subjects).map(subject => {
+        const subjectTasks = tasks.filter(t => t.subject === subject);
+        const completed = subjectTasks.filter(t => t.revisions >= 7).length;
+        return subjectTasks.length ? (completed / subjectTasks.length) * 100 : 0;
+      });
+
+      ```chartjs
+      {
+        type: 'bar',
+        data: {
+          labels: Object.keys(subjects),
+          datasets: [{
+            label: 'Revision Progress (%)',
+            data: subjectProgress,
+            backgroundColor: ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899'],
+            borderColor: ['#3730a3', '#047857', '#b45309', '#b91c1c', '#6d28d9', '#1d4ed8', '#db2777'],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              title: { display: true, text: 'Progress (%)' }
+            },
+            x: { title: { display: true, text: 'Subjects' } }
+          },
+          plugins: {
+            legend: { display: false },
+            title: { display: true, text: 'Revision Progress by Subject' }
+          }
+        }
+      }
+      ```
+      if (progressChart) progressChart.destroy();
+      progressChart = new Chart(ctx, JSON.parse(document.querySelector('#progressChart').previousElementSibling.textContent));
     }
 
     // Event listener for subject change
@@ -225,6 +322,7 @@
     // Initial render
     renderSubjects();
     renderTasks();
+    renderChart();
   </script>
 </body>
 </html>
